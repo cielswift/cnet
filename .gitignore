@@ -18,9 +18,9 @@ cmake-build-debug/
 *.iws
 *.iml
 *.ipr
-./cmake-build-debug-event-trace
-./cmake-build-debug
-./include_linux
+./cmake-build-debug-event-trace/**
+./cmake-build-debug/**
+./include_linux/**
 
 ### NetBeans ###
 /nbproject/private/

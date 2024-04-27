@@ -26,8 +26,10 @@ void handle(int sig) {
 
 int main(int argCount, char *args[]) {
 
+    //https://github.com/cielswift/cnet.git
+
     setlocale(LC_ALL, "zh_CN.UTF-8");
-    
+
     signal(SIGINT, &handle);
     signal(SIGTERM, &handle);
     signal(SIGKILL, &handle);
