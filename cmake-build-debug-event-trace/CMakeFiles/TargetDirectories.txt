@@ -1,3 +1,0 @@
-C:/software/project/cpp/cpp_learns/linux_dev/cmake-build-debug-event-trace/CMakeFiles/linuxDev.dir
-C:/software/project/cpp/cpp_learns/linux_dev/cmake-build-debug-event-trace/CMakeFiles/edit_cache.dir
-C:/software/project/cpp/cpp_learns/linux_dev/cmake-build-debug-event-trace/CMakeFiles/rebuild_cache.dir
