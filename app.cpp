@@ -26,7 +26,6 @@ void handle(int sig) {
 
 int main(int argCount, char *args[]) {
 
-    //https://github.com/cielswift/cnet.git
 
     setlocale(LC_ALL, "zh_CN.UTF-8");
 
@@ -40,11 +39,11 @@ int main(int argCount, char *args[]) {
     printf("now tid is %lu \n", pthread_self());
 
     int debug = 1;
-    if(args != NULL && args[0] != NULL){
-        debug = strtol(args[0],NULL,10);
+    if (args != NULL && args[1] != NULL) {
+        debug = strtol(args[1], NULL, 10);
     }
 
-    startLinuxEpoll(9095,debug);
+    startLinuxEpoll(9095, debug);
 
     return 0;
 }
