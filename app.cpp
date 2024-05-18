@@ -17,7 +17,7 @@ void printArgs(int argCount, char *args[]) {
         printf("args>> %s\n", args[i]);
     }
 }
-
+    
 void handle(int sig) {
     printf("kill >> %d\n", sig);
     exit(sig);
@@ -25,7 +25,6 @@ void handle(int sig) {
 
 
 int main(int argCount, char *args[]) {
-
 
     setlocale(LC_ALL, "zh_CN.UTF-8");
 

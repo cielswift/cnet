@@ -19,7 +19,7 @@
 
 static char RUN_SERVER = 0;
 static unsigned long long REQUEST_COUNT = 0;
-static const int MAX_EVENTS = 1024;
+static const int MAX_EVENTS = 256;
 static const int MAX_CLIENT_SIZE = 1024;
 static int debug = 1;
 
@@ -44,7 +44,6 @@ void closeClient(int status, int fd, SlaveEpollWrap *pSlaveEpollWrap) {
     if (debug) {
         printf("closeBefore->tid %lu,status%d,cid %d rs %zd, srid %d error %d ,receive data: %s \n",
                pthread_self(), status, fd, rn, pSlaveEpollWrap->epollFd, errno, buffer);
-
     }
 
     struct epoll_event event{0};
@@ -73,7 +72,7 @@ void closeClient(int status, int fd, SlaveEpollWrap *pSlaveEpollWrap) {
         }
     }
 }
-
+    
 void readDate(int fd, int status, unsigned int isWrite, SlaveEpollWrap *pSlaveEpollWrap) {
     char buffer_receive[512];
     memset(&buffer_receive, 0, sizeof(buffer_receive));
@@ -93,7 +92,7 @@ void readDate(int fd, int status, unsigned int isWrite, SlaveEpollWrap *pSlaveEp
         char text[32];
         int realCount = 0;
         memset(text, '\0', sizeof(text));
-        sprintf(text, "{\"time\":%lld}", now);
+        sprintf(text, "{\"time\":%lld}\n", now);
         for (int i = 0; i < 32; ++i) {
             if (text[i] == '\0') {
                 break;
@@ -415,11 +414,10 @@ int createEpoll(int server_socket_fd) {
 
 void startLinuxEpoll(int port, int deBug) {
     debug = deBug;
-
     int server_socket_fd = createSocketServer(port);
     int epoll_fd = createEpoll(server_socket_fd);
     MainEpollWrap mainEpollWrap = {epoll_fd, server_socket_fd};
-    printf("new server fd is %d, main epoll fd is %d \n", server_socket_fd, epoll_fd);
+    printf("severFd %d, mainEpollFd %d \n", mainEpollWrap.serverSocketFd, mainEpollWrap.epollFd);
 
     //从reactor 根据可用的核心数量
     int subReactorNum = 2;//sysconf(_SC_NPROCESSORS_ONLN);
@@ -436,14 +434,14 @@ void startLinuxEpoll(int port, int deBug) {
         }
     }
 
+    pthread_t pt_fds[subReactorNum];
     for (int i = 0; i < subReactorNum; ++i) {
-        pthread_t pt_fd;
-        if (pthread_create(&pt_fd, null, &subReactorProcessOne, slaveEpollWraps[i]) != 0) {
+        if (pthread_create(&pt_fds[i], null, &subReactorProcessOne, slaveEpollWraps[i]) != 0) {
             perror("create >> thread error");
             printf("err >> create thread error tid %lu\n", pthread_self());
         }
-        pthread_detach(pt_fd);
-    }
+        pthread_detach(pt_fds[i]);
+    }   
     ///////////////////////////////////////////////////////////////////////////////////////
 
     RUN_SERVER = 1;
@@ -465,7 +463,7 @@ void startLinuxEpoll(int port, int deBug) {
             int fd = events[i].data.fd; // 获取触发事件的文件描述符
             uint32_t event_flags = events[i].events; // 获取事件标志
             if ((event_flags & EPOLLIN) && fd == mainEpollWrap.serverSocketFd) {
-
+                
                 /**
                  *  即监听套接字上的 accept() 事件,对应的 events[i].data.fd 是服务端的套接字（即监听套接字），
                  *      那么可读事件（已连接套接字上的数据可读事件）对应的 events[i].data.fd 应该是已连接套接字的文件描述符
