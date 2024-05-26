@@ -25,9 +25,7 @@ void handle(int sig) {
 
 
 int main(int argCount, char *args[]) {
-
     setlocale(LC_ALL, "zh_CN.UTF-8");
-
     signal(SIGINT, &handle);
     signal(SIGTERM, &handle);
     signal(SIGKILL, &handle);
@@ -37,12 +35,12 @@ int main(int argCount, char *args[]) {
     printf("now pid is %d \n", getpid());
     printf("now tid is %lu \n", pthread_self());
 
-    int debug = 1;
-    if (args != NULL && args[1] != NULL) {
-        debug = strtol(args[1], NULL, 10);
-    }
+    cnet::EpollServer epollServer(9095,2,1024, true,1024);
+    epollServer.startLinuxEpoll();
 
-    startLinuxEpoll(9095, debug);
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::hours(1)); // 使线程睡眠1小时
+    }
 
     return 0;
 }
