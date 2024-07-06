@@ -9,6 +9,7 @@
 #include <vector>
 #include <unordered_map>
 #include <thread>
+#include "string"
 
 namespace cnet {
 
@@ -40,7 +41,7 @@ namespace cnet {
 
     class EpollModel {
     private:
-        std::thread *thread{};
+        std::thread *thread;
         std::unordered_map<int, cnet::ConnModel *> *socketFds;
         int epollFd;
         bool main;
@@ -56,6 +57,10 @@ namespace cnet {
         bool start(cnet::EpollServer *epollServer, int epollFd);
 
         bool stop(cnet::EpollServer *epollServer);
+
+        std::thread *getThread() const;
+
+        void setThread(std::thread *thread);
     };
 
     class EpollServer {

@@ -15,6 +15,12 @@
 #include <cerrno>
 #include <netinet/in.h>
 #include <iostream>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <sys/time.h>
+#include <netinet/tcp.h>
+#include "../json/yyjson.h"
 
 
 void cnet::closeConn(cnet::ConnModel *conn, cnet::EpollModel *epollModel, int status) {
@@ -83,7 +89,7 @@ void cnet::readData(cnet::ConnModel *conn, cnet::EpollModel *epollModel, int sta
     char text[32];
     int realCount = 0;
     memset(text, '\0', sizeof(text));
-    sprintf(text, "{\"time\":%lld}\n", now);
+    sprintf(text, "{\"time\":%ld}\n", now);
     for (int i = 0; i < 32; ++i) {
         if (text[i] == '\0') {
             break;
@@ -125,7 +131,7 @@ void cnet::subReactorLogic(cnet::EpollServer *epollServer, cnet::EpollModel *epo
         return;
     }
 
-    printf("tid %lu,sub reactor start process epoll fd %d \n", pthread_self(), epollModel->getEpollFd());
+    printf("thread id %lu,sub reactor %d start\n", pthread_self(), epollModel->getEpollFd());
 
     for (;;) {
 
@@ -216,7 +222,7 @@ void cnet::subReactorLogic(cnet::EpollServer *epollServer, cnet::EpollModel *epo
 }
 
 
-void cnet::addNewConnectionToEpoll(const cnet::ConnModel& connModel, cnet::EpollModel *epollModel) {
+void cnet::addNewConnectionToEpoll(const cnet::ConnModel &connModel, cnet::EpollModel *epollModel) {
     /**
      * 返回文件描述符的 状态
     * 这些标志通常是一些宏定义的位掩码，如 O_RDONLY、O_WRONLY、O_RDWR、O_NONBLOCK 等，
@@ -231,6 +237,63 @@ void cnet::addNewConnectionToEpoll(const cnet::ConnModel& connModel, cnet::Epoll
     struct epoll_event sub_conn_event{0};
     memset(&sub_conn_event, 0, sizeof(sub_conn_event));
 
+    //设置缓冲区大小
+    int bufferSize = 1024 * 64; //64kb
+    if (setsockopt(connModel.getSocketFd(), SOL_SOCKET, SO_RCVBUF, &bufferSize, sizeof(bufferSize)) < 0) {
+        perror("ERROR:SETTING RECEIVE BUFFER SIZE");
+        close(connModel.getSocketFd());
+        exit(EXIT_FAILURE);
+    }
+    if (setsockopt(connModel.getSocketFd(), SOL_SOCKET, SO_SNDBUF, &bufferSize, sizeof(bufferSize)) < 0) {
+        perror("ERROR:SETTING SEND BUFFER SIZE");
+        close(connModel.getSocketFd());
+        exit(EXIT_FAILURE);
+    }
+    //设置超时
+    struct timeval tv{0};
+    // 设置发送超时
+    tv.tv_sec = 2000 / 1000; // 2秒
+    tv.tv_usec = (2000 % 1000) * 1000; // 微秒
+    if (setsockopt(connModel.getSocketFd(), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("setsockopt SO_SNDTIMEO");
+        close(connModel.getSocketFd());
+        exit(EXIT_FAILURE);
+    }
+    if (setsockopt(connModel.getSocketFd(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("setsockopt SO_RCVTIMEO");
+        close(connModel.getSocketFd());
+        exit(EXIT_FAILURE);
+    }
+
+    // 设置SO_KEEPALIVE及其相关参数，例如空闲时间设为2小时，探测间隔为15秒，最大探测次数为5次
+    int val = 1; // 启用SO_KEEPALIVE选项
+    // 首先启用SO_KEEPALIVE选项
+    if (setsockopt(connModel.getSocketFd(), SOL_SOCKET, SO_KEEPALIVE, &val, sizeof(val)) < 0) {
+        perror("setsockopt SO_KEEPALIVE");
+        exit(EXIT_FAILURE);
+    }
+
+    // 下面的设置可能依赖于平台和内核版本，不一定所有系统都支持
+    int idle = 7200;
+    if (idle > 0 && setsockopt(connModel.getSocketFd(), IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle)) < 0) {
+        perror("setsockopt TCP_KEEPIDLE");
+        exit(EXIT_FAILURE);
+    }
+
+    int interval = 15;
+    if (interval > 0 &&
+        setsockopt(connModel.getSocketFd(), IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval)) < 0) {
+        perror("setsockopt TCP_KEEPINTVL");
+        exit(EXIT_FAILURE);
+    }
+
+    int count = 5;
+    if (count > 0 && setsockopt(connModel.getSocketFd(), IPPROTO_TCP, TCP_KEEPCNT, &count, sizeof(count)) < 0) {
+        perror("setsockopt TCP_KEEPCNT");
+        exit(EXIT_FAILURE);
+    }
+
+
     /**
      * 监听可读事件 和 挂起事件 并启用边缘触发
      *  EPOLLHUP 连接关闭 当连接断开时，epoll_wait()函数会返回EPOLLHUP事件。同时，由于TCP连接关闭时，TCP栈会在接收缓冲区填充一个 EOF 标记，
@@ -242,34 +305,49 @@ void cnet::addNewConnectionToEpoll(const cnet::ConnModel& connModel, cnet::Epoll
     sub_conn_event.data.fd = connModel.getSocketFd(); // 关联已连接套接字的文件描述符
 
     if (epoll_ctl(epollModel->getEpollFd(), EPOLL_CTL_ADD, connModel.getSocketFd(), &sub_conn_event) == -1) {
-        perror("ERROR:epoll_ctl err");
+        perror("ERROR:epoll_ctl err>");
     }
 
-    std::unordered_map<int, cnet::ConnModel *> *subs = epollModel->getSocketFds();
+    std::unordered_map < int, cnet::ConnModel * > *subs = epollModel->getSocketFds();
     auto *con = new cnet::ConnModel;
     con->setSocketFd(connModel.getSocketFd());
     con->setRemoteAddr(connModel.getRemoteAddr());
     con->setRemotePort(connModel.getRemotePort());
     subs->insert({connModel.getSocketFd(), con});
 
-    printf("newConn->tid %lu. cid %d. srid %d regis finish \n", pthread_self(), connModel.getSocketFd(),
-           epollModel->getEpollFd());
+    printf("thread id %lu. new connection fd %d. sub epoll fd %d. remote ip %s. remote port %d. regis finish \n",
+           pthread_self(),
+           connModel.getSocketFd(),
+           epollModel->getEpollFd(),
+           con->getRemoteAddr().c_str(),
+           con->getRemotePort());
+
+    printf("this sub epoll regis %zu \n",subs->size());
 }
 
 
 void cnet::mainReactorLogic(cnet::EpollServer *epollServer) {
 
     cnet::EpollModel *mainReactor = epollServer->getMainReactor();
-    std::unordered_map<int, cnet::EpollModel *> *subReactors = epollServer->getSubReactors();
+    std::unordered_map < int, cnet::EpollModel * > *subReactors = epollServer->getSubReactors();
 
     if (mainReactor == nullptr || subReactors == nullptr) {
         printf("ERROR: %p or %p null \n", mainReactor, subReactors);
         return;
     }
 
+    long allRequests = 0;
+    cnet::EpollModel *subReactorsArr[subReactors->size()];
+    for (const auto &item: *subReactors) {
+        subReactorsArr[allRequests] = item.second;
+        allRequests++;
+    }
+
+    allRequests = 0;
+
     int serverFd = mainReactor->getSocketFds()->begin()->first;
     int meFd = mainReactor->getEpollFd();
-    printf("mainTid %lu reactor start work sFd %d meFd %d \n", pthread_self(), serverFd, meFd);
+    printf("thread id %lu,main reactor %d server fd %d. start\n", pthread_self(), meFd, serverFd);
 
     for (;;) {
         if (epollServer->getStatus() == 2) {
@@ -297,7 +375,7 @@ void cnet::mainReactorLogic(cnet::EpollServer *epollServer) {
             continue;
         }
 
-        std::vector<ConnModel> connsModels(0);
+        std::vector <ConnModel> connsModels(0);
 
         for (int i = 0; i < num_events; ++i) {
             int fd = events[i].data.fd; // 获取触发事件的文件描述符
@@ -315,7 +393,7 @@ void cnet::mainReactorLogic(cnet::EpollServer *epollServer) {
 
                 bool hadConned = false;
                 for (const auto &item: *subReactors) {
-                    std::unordered_map<int, cnet::ConnModel *> *conns = item.second->getSocketFds();
+                    std::unordered_map < int, cnet::ConnModel * > *conns = item.second->getSocketFds();
                     if (conns != nullptr) {
                         if (conns->find(conn_sock_fd) != conns->end()) {
                             hadConned = true;
@@ -328,12 +406,6 @@ void cnet::mainReactorLogic(cnet::EpollServer *epollServer) {
                 inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
                 int port = ntohs(client_addr.sin_port);
 
-                if (epollServer->isDebug()) {
-                    printf("addNewConnectionBefore-> tid %lu. cid %d. cidIp %s. cidPort %d. error %d. hadConnFd %d\n",
-                           pthread_self(), conn_sock_fd, client_ip,
-                           port, errno, hadConned);
-                }
-
                 ConnModel connModel;
                 connModel.setSocketFd(conn_sock_fd);
                 connModel.setRemoteAddr(std::string(client_ip));
@@ -345,12 +417,9 @@ void cnet::mainReactorLogic(cnet::EpollServer *epollServer) {
             }
         }
 
-        auto it = subReactors->begin();
+        cnet::EpollModel *selectModel = subReactorsArr[allRequests % subReactors->size()];
         for (const auto &item: connsModels) {
-            if (it == subReactors->end()) {
-                ++it;
-            }
-            addNewConnectionToEpoll(item, it->second);
+            addNewConnectionToEpoll(item, selectModel);
         }
     }
 
@@ -372,10 +441,22 @@ int cnet::createSocketServer(int port) {
 
     // 假设之前已经设置了SO_REUSEADDR，现在要关闭它
     int optval = 0; // 0 表示关闭SO_REUSEADDR
-    socklen_t len = sizeof(optval);
     // 使用setsockopt关闭SO_REUSEADDR选项
-    if (setsockopt(server_socket_fd, SOL_SOCKET, SO_REUSEADDR, &optval, len) < 0) {
+    if (setsockopt(server_socket_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
         perror("ERROR:setsockopt to disable SO_REUSEADDR failed");
+        exit(EXIT_FAILURE);
+    }
+
+    //设置超时
+    struct timeval tv{0};
+    tv.tv_sec = 2000 / 1000; // 2秒
+    tv.tv_usec = (2000 % 1000) * 1000; // 微秒
+    if (setsockopt(server_socket_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR:SO_SNDTIMEO");
+        exit(EXIT_FAILURE);
+    }
+    if (setsockopt(server_socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("ERROR:SO_RCVTIMEO");
         exit(EXIT_FAILURE);
     }
 
@@ -463,6 +544,8 @@ cnet::EpollServer::EpollServer(int port, int subReactor, int maxConnection, bool
                                                                                                         debug(debug),
                                                                                                         maxEvent(
                                                                                                                 maxEvent) {
+    this->mainReactor = nullptr;
+    this->subReactors = nullptr;
     this->status = 0;
 }
 
@@ -479,11 +562,6 @@ bool cnet::EpollServer::startLinuxEpoll() {
         connModel->setSocketFd(socketFd);
         socketFds->insert({socketFd, connModel});
         this->mainReactor = new cnet::EpollModel(socketFds, epollFd, true);
-
-
-        printf("severFd %d, mainEpollFd %d start\n",
-               this->mainReactor->getSocketFds()->find(socketFd)->second->getSocketFd(),
-               this->mainReactor->getEpollFd());
         //start
         this->mainReactor->start(this, epollFd);
     }
@@ -503,7 +581,6 @@ bool cnet::EpollServer::startLinuxEpoll() {
 
         for (const auto &item: *this->subReactors) {
             //start
-            printf("subEpollFd %d start\n", item.first);
             item.second->start(this, item.first);
         }
     }
@@ -516,11 +593,13 @@ bool cnet::EpollServer::startLinuxEpoll() {
 bool cnet::EpollModel::start(cnet::EpollServer *epollServer, int epollFd) {
     if (this->main) {
         auto *myThread = new std::thread(&mainReactorLogic, epollServer);
+        setThread(myThread);
         myThread->detach();
         return true;
     } else {
-        std::unordered_map<int, cnet::EpollModel *> *reactors = epollServer->getSubReactors();
+        std::unordered_map < int, cnet::EpollModel * > *reactors = epollServer->getSubReactors();
         auto *myThread = new std::thread(&subReactorLogic, epollServer, reactors->find(epollFd)->second);
+        setThread(myThread);
         myThread->detach();
         return true;
     }
@@ -585,7 +664,7 @@ cnet::EpollModel::EpollModel(std::unordered_map<int, cnet::ConnModel *> *socketF
         : socketFds(socketFds),
           epollFd(epollFd),
           main(main) {
-
+    this->thread = nullptr;
 }
 
 int cnet::EpollModel::getEpollFd() const {
@@ -598,6 +677,14 @@ std::unordered_map<int, cnet::ConnModel *> *cnet::EpollModel::getSocketFds() con
 
 bool cnet::EpollModel::isMain() const {
     return main;
+}
+
+std::thread *cnet::EpollModel::getThread() const {
+    return thread;
+}
+
+void cnet::EpollModel::setThread(std::thread *thread) {
+    EpollModel::thread = thread;
 }
 
 

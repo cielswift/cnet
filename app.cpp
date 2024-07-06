@@ -4,7 +4,6 @@
 
 #include <cstdio>
 #include <pthread.h>
-#include <dlfcn.h>
 #include <clocale>
 #include <csignal>
 #include <cstdlib>
@@ -33,15 +32,15 @@ int main(int argCount, char *args[]) {
     printArgs(argCount, args);
 
     printf("now pid is %d \n", getpid());
+
     printf("now tid is %lu \n", pthread_self());
 
-    cnet::EpollServer epollServer(9095,2,1024, true,1024);
+    cnet::EpollServer epollServer(22095,2,1024, true,1024);
     epollServer.startLinuxEpoll();
 
     while (true) {
         std::this_thread::sleep_for(std::chrono::hours(1)); // 使线程睡眠1小时
     }
-
     return 0;
 }
 
