@@ -606,7 +606,7 @@ bool cnet::EpollModel::start(cnet::EpollServer *epollServer, int epollFd) {
 }
 
 bool cnet::EpollModel::stop(cnet::EpollServer *epollServer) {
-
+    return true;
 }
 
 bool cnet::EpollServer::showDownServer() {
